@@ -19,59 +19,32 @@
 
 #include "bridge.h"
 
-int CoreWrap::showFpsCounter = 0;
+int CoreBridge::showFpsCounter = 0;
+int CoreBridge::buttonScale = 5;
+int CoreBridge::buttonSpacing = 5;
+int CoreBridge::vibrateStrength = 2;
+
+static std::mutex mutex;
+static Core *core = nullptr;
+static std::thread *thread = nullptr;
+static bool running = false;
+
 static uint32_t framebuffer[256 * 192 * 8];
 static uint32_t *fbCur[] = { framebuffer, framebuffer };
 
-static void runCore(Core *core) {
+static void runCore() {
     // Run the emulator
-    while (core)
+    while (running)
         core->runCore();
 }
 
-CoreWrap::CoreWrap(const char *path) {
-    // Initialize the core with a NDS or GBA ROM based on file extension
-    std::string path2 = path;
-    if (path2.find(".nds", path2.length() - 4) != std::string::npos)
-        core = new Core(path2, "");
-    else if (path2.find(".gba", path2.length() - 4) != std::string::npos)
-        core = new Core("", path2);
-    else
-        core = new Core();
-    thread = new std::thread(&runCore, core);
-}
-
-void CoreWrap::updateFrame() const {
-    // Update the framebuffer used by the image callbacks
-    bool gba = core->gbaMode && ScreenLayout::gbaCrop;
-    core->gpu.getFrame(framebuffer, gba);
-}
-
-void CoreWrap::getSamples(void *buffer, uint32_t count) const {
-    // Fill an audio buffer with core data resampled to 44100Hz
-    uint32_t scale = (count & ~0x1) * 32768 / 44100; // Rounded for consistency
-    uint32_t *samples = core->spu.getSamples(scale);
-    for (int i = 0; i < count; i++)
-        ((uint32_t*)buffer)[i] = samples[i * scale / count];
-    delete[] samples;
-}
-
-void CoreWrap::pressScreen(int x, int y) const {
-    // Press the screen and set coordinates
-    core->input.pressScreen();
-    core->spi.setTouch(x, y);
-}
-
-void CoreWrap::releaseScreen() const {
-    // Release the screen and clear coordinates
-    core->input.releaseScreen();
-    core->spi.clearTouch();
-}
-
-bool CoreWrap::loadSettings(const char *path) {
+bool CoreBridge::loadSettings(const char *path) {
     // Define and add the platform settings
     std::vector<Setting> platformSettings = {
         Setting("showFpsCounter", &showFpsCounter, false),
+        Setting("buttonScale", &buttonScale, false),
+        Setting("buttonSpacing", &buttonSpacing, false),
+        Setting("vibrateStrength", &vibrateStrength, false),
     };
     ScreenLayout::addSettings();
     Settings::add(platformSettings);
@@ -87,7 +60,119 @@ bool CoreWrap::loadSettings(const char *path) {
     return true;
 }
 
-int CoreWrap::bytesCb(void *info, void *buffer, int count) {
+int CoreBridge::loadRom(const char *ndsPath, const char *gbaPath) {
+    // Clean up the old core
+    mutex.lock();
+    delete core;
+    core = nullptr;
+    mutex.unlock();
+
+    // Try to create a new core with the given paths
+    try {
+        core = new Core(ndsPath, gbaPath);
+        return 0;
+    }
+    catch (CoreError e) {
+        return e;
+    }
+}
+
+void CoreBridge::resizeSave(int size) {
+    // Resize a GBA or NDS save based on what's running
+    if (core->gbaMode)
+        core->cartridgeGba.resizeSave(size);
+    else
+        core->cartridgeNds.resizeSave(size);
+}
+
+StateResult CoreBridge::checkState() {
+    // Get the status of a state file
+    return core->saveStates.checkState();
+}
+
+bool CoreBridge::saveState() {
+    // Save a state file
+    return core->saveStates.saveState();
+}
+
+bool CoreBridge::loadState() {
+    // Load a state file
+    return core->saveStates.loadState();
+}
+
+void CoreBridge::start() {
+    // Start the core thread if stopped
+    if (running) return;
+    running = true;
+    thread = new std::thread(&runCore);
+}
+
+void CoreBridge::stop() {
+    // Stop the core thread if started
+    if (!running) return;
+    running = false;
+    thread->join();
+    delete thread;
+}
+
+void CoreBridge::updateFrame() {
+    // Update the framebuffer used by the image callbacks
+    if (!core) return;
+    bool gba = core->gbaMode && ScreenLayout::gbaCrop;
+    core->gpu.getFrame(framebuffer, gba);
+}
+
+void CoreBridge::getSamples(void *buffer, uint32_t count) {
+    // Return an empty buffer if the core isn't active
+    mutex.lock();
+    if (!core) {
+        mutex.unlock();
+        memset(buffer, 0, count * sizeof(uint32_t));
+        return;
+    }
+
+    // Fill an audio buffer with core data resampled to 44100Hz
+    uint32_t scale = (count & ~0x1) * 32768 / 44100; // Rounded for consistency
+    uint32_t *samples = core->spu.getSamples(scale);
+    mutex.unlock();
+    for (int i = 0; i < count; i++)
+        ((uint32_t*)buffer)[i] = samples[i * scale / count];
+    delete[] samples;
+}
+
+bool CoreBridge::getGbaMode() {
+    // Check if the core is in GBA mode
+    return core ? core->gbaMode : false;
+}
+
+int CoreBridge::getFps() {
+    // Read the core's FPS counter
+    return core ? core->fps : 0;
+}
+
+void CoreBridge::pressKey(int key) {
+    // Press a key
+    core->input.pressKey(key);
+}
+
+void CoreBridge::releaseKey(int key) {
+    // Release a key
+    core->input.releaseKey(key);
+}
+
+void CoreBridge::pressScreen(int x, int y) {
+    // Press the screen and set coordinates
+    core->input.pressScreen();
+    core->spi.setTouch(x, y);
+}
+
+void CoreBridge::releaseScreen() {
+    // Release the screen and clear coordinates
+    core->input.releaseScreen();
+    core->spi.clearTouch();
+}
+
+int CoreBridge::bytesCb(void *info, void *buffer, int count) {
     // Copy top/bottom framebuffer bytes to an image and move the pointer
     uint8_t i = *(uint8_t*)info;
     int s = (Settings::highRes3D || Settings::screenFilter == 1) ? 2 : 0;
@@ -98,7 +183,7 @@ int CoreWrap::bytesCb(void *info, void *buffer, int count) {
     return count;
 }
 
-int CoreWrap::forwardCb(void *info, int count) {
+int CoreBridge::forwardCb(void *info, int count) {
     // Move the top/bottom framebuffer pointer forward
     uint8_t i = *(uint8_t*)info;
     int s = (Settings::highRes3D || Settings::screenFilter == 1) ? 2 : 0;
@@ -108,7 +193,7 @@ int CoreWrap::forwardCb(void *info, int count) {
     return count;
 }
 
-void CoreWrap::rewindCb(void *info) {
+void CoreBridge::rewindCb(void *info) {
     // Reset the top/bottom framebuffer pointer
     uint8_t i = *(uint8_t*)info;
     int s = (Settings::highRes3D || Settings::screenFilter == 1) ? 2 : 0;

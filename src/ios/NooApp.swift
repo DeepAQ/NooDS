@@ -18,27 +18,50 @@
 */
 
 import SwiftUI
+import AVFAudio
 
 @main
 struct NooApp: App {
     @State var running = false
-    @State var path = String()
+    @State var ndsPath = String()
+    @State var gbaPath = String()
+    let audio = AVAudioEngine()
 
     init() {
         // Initialize settings using the app's documents folder
         let docsUrl = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        CoreWrap.loadSettings(docsUrl.path + "/noods")
+        CoreBridge.loadSettings(docsUrl.path + "/noods")
+
+        // Configure the audio session for playback
+        let session = AVAudioSession.sharedInstance()
+        try! session.setCategory(.playback, mode: .moviePlayback)
+        try! session.setActive(true)
+
+        // Hook up the audio callback and start playing
+        let format = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 44100, channels: 2, interleaved: true)!
+        let source = AVAudioSourceNode(format: format, renderBlock: audioCb)
+        audio.attach(source)
+        audio.connect(source, to: audio.outputNode, format: format)
+        audio.prepare()
+        try! audio.start()
     }
 
     var body: some Scene {
         // Choose the current window based on run state
         WindowGroup {
             if running {
-                NooView(path: path)
+                NooView(running: $running, ndsPath: ndsPath, gbaPath: gbaPath)
             }
             else {
-                FileBrowser(running: $running, path: $path)
+                FileBrowser(running: $running, ndsPath: $ndsPath, gbaPath: $gbaPath)
             }
         }
+    }
+
+    func audioCb(isSilence: UnsafeMutablePointer<ObjCBool>, timestamp: UnsafePointer<AudioTimeStamp>,
+        frameCount: AVAudioFrameCount, outputData: UnsafeMutablePointer<AudioBufferList>) -> OSStatus {
+        // Get the core to fill the audio buffer
+        CoreBridge.getSamples(outputData.pointee.mBuffers.mData, frameCount)
+        return noErr
     }
 }

@@ -51,7 +51,7 @@
 #include "wifi.h"
 
 enum CoreError {
-    ERROR_BIOS,
+    ERROR_BIOS = 1,
     ERROR_FIRM,
     ERROR_ROM
 };

@@ -84,6 +84,36 @@ struct SettingsPicker: View {
     }
 }
 
+struct SettingsSlider: View {
+    let title: String
+    let value: UnsafeMutablePointer<CInt>
+    let range: ClosedRange<CGFloat>
+    @State var position: CGFloat
+
+    init(title: String, value: UnsafeMutablePointer<CInt>, range: ClosedRange<CGFloat>) {
+        // Set values and initial slider position
+        self.title = title
+        self.value = value
+        self.range = range
+        self.position = CGFloat(value.pointee)
+    }
+
+    var body: some View {
+        // Show a slider that updates and saves a multi-choice setting
+        HStack {
+            Text(title)
+            Spacer()
+            Slider(value: $position, in: range, step: 1) {
+                Text(title)
+            } onEditingChanged: { _ in
+                value.pointee = CInt(position)
+                Settings.save()
+            }
+            .frame(width: 150, height: 0)
+        }
+    }
+}
+
 struct SettingsMenu: View {
     var body: some View {
         List {
@@ -92,7 +122,7 @@ struct SettingsMenu: View {
             SettingsToggle(title: "Direct Boot", value: &Settings.directBoot)
             SettingsToggle(title: "Keep ROM in RAM", value: &Settings.romInRam)
             SettingsToggle(title: "FPS Limiter", value: &Settings.fpsLimiter)
-            SettingsToggle(title: "Show FPS Counter", value: &CoreWrap.showFpsCounter)
+            SettingsToggle(title: "Show FPS Counter", value: &CoreBridge.showFpsCounter)
 
             // List the graphics settings category
             SettingsHeader(title: "Graphics Settings")
@@ -138,6 +168,13 @@ struct SettingsMenu: View {
                 labels: ["Default", "16:10", "16:9", "18:9"])
             SettingsToggle(title: "Integer Scale", value: &ScreenLayout.integerScale)
             SettingsToggle(title: "GBA Crop", value: &ScreenLayout.gbaCrop)
+
+            // List the on-screen controls category
+            SettingsHeader(title: "On-Screen Controls")
+            SettingsSlider(title: "Button Scale", value: &CoreBridge.buttonScale, range: 0...10)
+            SettingsSlider(title: "Button Spacing", value: &CoreBridge.buttonSpacing, range: 0...10)
+            SettingsPicker(title: "Vibration Strength", value: &CoreBridge.vibrateStrength,
+                labels: ["None", "Soft", "Light", "Medium", "Heavy", "Rigid"])
         }
         .navigationTitle("Settings")
     }

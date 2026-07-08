@@ -23,27 +23,34 @@
 #include "../common/nds_icon.h"
 #include "../common/screen_layout.h"
 
-class CoreWrap {
-public:
-    static int showFpsCounter;
+namespace CoreBridge {
+    extern int showFpsCounter;
+    extern int buttonScale;
+    extern int buttonSpacing;
+    extern int vibrateStrength;
 
-    CoreWrap(const char *path);
-    int getFps() const { return core->fps; }
-    bool getGbaMode() const { return core->gbaMode; }
+    bool loadSettings(const char *path);
+    int loadRom(const char *ndsPath, const char *gbaPath);
+    void resizeSave(int size);
 
-    void updateFrame() const;
-    void getSamples(void *buffer, uint32_t count) const;
-    void pressKey(int key) const { core->input.pressKey(key); }
-    void releaseKey(int key) const { core->input.releaseKey(key); }
-    void pressScreen(int x, int y) const;
-    void releaseScreen() const;
-    
-    static bool loadSettings(const char *path);
-    static int bytesCb(void *info, void *buffer, int count);
-    static int forwardCb(void *info, int count);
-    static void rewindCb(void *info);
+    StateResult checkState();
+    bool saveState();
+    bool loadState();
 
-private:
-    Core *core;
-    std::thread *thread;
+    void start();
+    void stop();
+
+    void updateFrame();
+    void getSamples(void *buffer, uint32_t count);
+    bool getGbaMode();
+    int getFps();
+
+    void pressKey(int key);
+    void releaseKey(int key);
+    void pressScreen(int x, int y);
+    void releaseScreen();
+
+    int bytesCb(void *info, void *buffer, int count);
+    int forwardCb(void *info, int count);
+    void rewindCb(void *info);
 };
