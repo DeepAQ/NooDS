@@ -23,6 +23,7 @@ int CoreBridge::showFpsCounter = 0;
 int CoreBridge::buttonScale = 5;
 int CoreBridge::buttonSpacing = 5;
 int CoreBridge::vibrateStrength = 2;
+std::string CoreBridge::keyBinds[15] = {};
 
 static std::mutex mutex;
 static Core *core = nullptr;
@@ -45,6 +46,21 @@ bool CoreBridge::loadSettings(const char *path) {
         Setting("buttonScale", &buttonScale, false),
         Setting("buttonSpacing", &buttonSpacing, false),
         Setting("vibrateStrength", &vibrateStrength, false),
+        Setting("keyA", &keyBinds[0], true),
+        Setting("keyB", &keyBinds[1], true),
+        Setting("keySelect", &keyBinds[2], true),
+        Setting("keyStart", &keyBinds[3], true),
+        Setting("keyRight", &keyBinds[4], true),
+        Setting("keyLeft", &keyBinds[5], true),
+        Setting("keyUp", &keyBinds[6], true),
+        Setting("keyDown", &keyBinds[7], true),
+        Setting("keyR", &keyBinds[8], true),
+        Setting("keyL", &keyBinds[9], true),
+        Setting("keyX", &keyBinds[10], true),
+        Setting("keyY", &keyBinds[11], true),
+        Setting("keyFastHold", &keyBinds[12], true),
+        Setting("keyFastToggle", &keyBinds[13], true),
+        Setting("keyScreenSwap", &keyBinds[14], true)
     };
     ScreenLayout::addSettings();
     Settings::add(platformSettings);

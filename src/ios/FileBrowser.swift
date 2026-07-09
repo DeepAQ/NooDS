@@ -56,20 +56,21 @@ struct FileRow: View {
 }
 
 struct FileBrowser: View {
-    @Binding var running: Bool
-    @Binding var ndsPath: String
-    @Binding var gbaPath: String
-    @State var curPath: String
-    @State var contents: [String]
-    let manager = FileManager.default
-    let base: String
+    @Binding private var running: Bool
+    @Binding private var ndsPath: String
+    @Binding private var gbaPath: String
+    @State private var curPath: String
+    @State private var contents: [String]
+    private let manager = FileManager.default
+    private let base: String
 
-    @State var dualRoms = false
-    @State var askGba = false
-    @State var showError = false
-    @State var errorType = 0 as CInt
+    @State private var dualRoms = false
+    @State private var askGba = false
+    @State private var showError = false
+    @State private var errorType = 0 as CInt
+    @State private var showInfo: Bool
 
-    init(running: Binding<Bool>, ndsPath: Binding<String>, gbaPath: Binding<String>) {
+    init(running: Binding<Bool>, ndsPath: Binding<String>, gbaPath: Binding<String>, firstBoot: Bool) {
         // Initialize values for the base directory
         let docsUrl = manager.urls(for: .documentDirectory, in: .userDomainMask).first!
         _running = running
@@ -78,6 +79,7 @@ struct FileBrowser: View {
         curPath = docsUrl.path
         contents = try! manager.contentsOfDirectory(atPath: docsUrl.path).sorted()
         base = docsUrl.path
+        showInfo = firstBoot
     }
 
     var body: some View {
@@ -138,6 +140,34 @@ struct FileBrowser: View {
             }
             .navigationTitle("NooDS")
             .toolbar {
+                // Link to the welcome info in the toolbar
+                Button {
+                    showInfo = true
+                }
+                label: {
+                    Image(systemName: "info.circle.fill")
+                }
+                .sheet(isPresented: $showInfo) {
+                    VStack {
+                        Text("Welcome to NooDS").font(.title)
+                        let msg = "Thanks for using my emulator! This is the official iOS app for " +
+                        "NooDS, which is automatically updated with the latest changes [on GitHub]" +
+                        "(https://github.com/Hydr8gon/NooDS/releases). To get started, copy DS or GBA " +
+                        "ROMs to the app's storage using a computer or this device's Files app. You can " +
+                        "then select them in the file browser here.\n\nMy projects are free and open-source, " +
+                        "but donations help me continue to work on them. If you're feeling generous, here " +
+                        "are some ways to support me: [one-time via PayPal](https://paypal.me/Hydr8gon) " +
+                        "or [monthly via Patreon](https://www.patreon.com/Hydr8gon)."
+                        Text(.init(msg)).padding(.all, 10)
+                        Button {
+                            showInfo = false
+                        }
+                        label: {
+                            Text("OK").font(.title3)
+                        }
+                    }
+                }
+
                 // Link to the settings menu in the toolbar
                 NavigationLink {
                     SettingsMenu()
@@ -187,7 +217,7 @@ struct FileBrowser: View {
         })
     }
 
-    func loadRom() -> Void {
+    private func loadRom() -> Void {
         // Load a ROM or show an error if failed
         let type = CoreBridge.loadRom(ndsPath, gbaPath)
         if type == 0 {

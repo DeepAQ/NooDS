@@ -36,7 +36,7 @@ endif
 all: $(NAME)
 
 ifneq ($(OS),Windows_NT)
-ifeq ($(uname -s),Darwin)
+ifeq ($(shell uname -s),Darwin)
 
 install: $(NAME)
 	./mac-bundle.sh
@@ -44,6 +44,12 @@ install: $(NAME)
 
 uninstall:
 	rm -rf /Applications/$(APPNAME).app
+
+ios:
+	xcodebuild archive -scheme NooDS -configuration Release -sdk iphoneos -archivePath noods.xcarchive \
+		CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
+	cd noods.xcarchive/Products && mv Applications Payload && zip -r ../../noods.ipa Payload
+	rm -rf noods.xcarchive
 
 else
 

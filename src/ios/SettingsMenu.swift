@@ -37,7 +37,7 @@ struct SettingsHeader: View {
 struct SettingsToggle: View {
     let title: String
     let value: UnsafeMutablePointer<CInt>
-    @State var state: Bool
+    @State private var state: Bool
 
     init(title: String, value: UnsafeMutablePointer<CInt>) {
         // Set values and initial toggle state
@@ -60,7 +60,7 @@ struct SettingsPicker: View {
     let title: String
     let value: UnsafeMutablePointer<CInt>
     let labels: [String]
-    @State var select: Int
+    @State private var select: Int
 
     init(title: String, value: UnsafeMutablePointer<CInt>, labels: [String]) {
         // Set values and initial picker selection
@@ -88,7 +88,7 @@ struct SettingsSlider: View {
     let title: String
     let value: UnsafeMutablePointer<CInt>
     let range: ClosedRange<CGFloat>
-    @State var position: CGFloat
+    @State private var position: CGFloat
 
     init(title: String, value: UnsafeMutablePointer<CInt>, range: ClosedRange<CGFloat>) {
         // Set values and initial slider position
@@ -177,5 +177,14 @@ struct SettingsMenu: View {
                 labels: ["None", "Soft", "Light", "Medium", "Heavy", "Rigid"])
         }
         .navigationTitle("Settings")
+        .toolbar {
+            // Link to the input bindings in the toolbar
+            NavigationLink {
+                InputBindings()
+            }
+            label: {
+                Image(systemName: "dpad.fill")
+            }
+        }
     }
 }

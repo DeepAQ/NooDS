@@ -20,10 +20,10 @@
 import SwiftUI
 
 struct NooButton: View {
-    @Binding var menu: Bool
-    @State var state = 0
     let ids: [Int32]
     var images = [Image]()
+    @Binding private var menu: Bool
+    @State private var state = 0
 
     init(menu: Binding<Bool>, ids: [Int32], name: String) {
         // Set values and add the button's released image
@@ -88,7 +88,7 @@ struct NooButton: View {
         }
     }
 
-    func vibrate() {
+    private func vibrate() {
         // Vibrate with the configured strength for button presses/releases
         if CoreBridge.vibrateStrength > 0 {
             let styles = ([UIImpactFeedbackGenerator.FeedbackStyle])([.soft, .light, .medium, .heavy, .rigid])
@@ -96,7 +96,7 @@ struct NooButton: View {
         }
     }
 
-    func checkDir(cond: Bool, i: Int) -> Void {
+    private func checkDir(cond: Bool, i: Int) -> Void {
         // Update a direction's state and press/release its key
         if cond {
             state |= 1 << i

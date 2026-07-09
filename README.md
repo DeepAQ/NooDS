@@ -7,7 +7,7 @@ upscaling, and can take advantage of multiple cores for better performance. I st
 learning experience, and I'd like to keep it that way. If people are interested and get use out of it, that's a bonus!
 
 ### Downloads
-NooDS is available for Windows, macOS, Linux, Android, Switch, Wii U, and Vita. The latest builds are automatically
+NooDS is available for Windows, macOS, Linux, Android, iOS, Switch, Wii U, and Vita. The latest builds are automatically
 provided via GitHub Actions, and can be downloaded from the [releases page](https://github.com/Hydr8gon/NooDS/releases).
 
 ### Usage
@@ -35,6 +35,9 @@ or a built-in package manager on Linux. Run `make -j$(nproc)` in the project roo
 
 **Android:** Install [Android Studio](https://developer.android.com/studio) or the command line tools. Run
 `./gradlew assembleDebug` in the project root directory to start building; dependencies will be installed as needed.
+
+**iOS:** Install [Xcode](https://developer.apple.com/xcode) on a system running macOS and open NooDS.xcodeproj in it.
+You can also run `make ios` in the project root directory to build an unsigned .ipa file.
 
 **Switch:** Install [devkitPro](https://devkitpro.org/wiki/Getting_Started) and its `switch-dev` package. Run
 `make switch -j$(nproc)` in the project root directory to start building.

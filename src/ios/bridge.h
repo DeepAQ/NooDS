@@ -28,6 +28,7 @@ namespace CoreBridge {
     extern int buttonScale;
     extern int buttonSpacing;
     extern int vibrateStrength;
+    extern std::string keyBinds[15];
 
     bool loadSettings(const char *path);
     int loadRom(const char *ndsPath, const char *gbaPath);

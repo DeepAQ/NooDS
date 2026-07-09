@@ -17,13 +17,69 @@
     along with NooDS. If not, see <https://www.gnu.org/licenses/>.
 */
 
+import GameController
 import SwiftUI
 
+private var fpsLimiterBackup = 0 as CInt
+private var prevKeys = 0 as UInt32
+
+private func updateKey(elem: GCControllerElement, cond: Bool, i: Int) {
+    // Handle a key press or release if the mapping matches
+    let binds = UnsafePointer<std.string>(&CoreBridge.keyBinds.0)
+    if elem.localizedName == String(binds[i]) {
+        if cond && (prevKeys & (1 << i)) == 0 { // Pressed
+            prevKeys |= (1 << i)
+            switch i {
+            case 12: // Fast forward hold
+                // Disable the FPS limiter
+                if (Settings.fpsLimiter != 0) {
+                    fpsLimiterBackup = Settings.fpsLimiter
+                    Settings.fpsLimiter = 0
+                }
+
+            case 13: // Fast forward toggle
+                // Toggle between disabling and restoring the FPS limiter
+                if (Settings.fpsLimiter != 0) {
+                    fpsLimiterBackup = Settings.fpsLimiter;
+                    Settings.fpsLimiter = 0
+                }
+                else if (fpsLimiterBackup != 0) {
+                    Settings.fpsLimiter = fpsLimiterBackup;
+                    fpsLimiterBackup = 0;
+                }
+
+            case 14: // Screen swap toggle
+                // Toggle between favoring the top or bottom screen
+                ScreenLayout.screenSizing = (ScreenLayout.screenSizing == 1) ? 2 : 1
+
+            default:
+                // Send a key press to the core
+                CoreBridge.pressKey(CInt(i))
+            }
+        }
+        else if !cond && (prevKeys & (1 << i)) != 0 { // Released
+            prevKeys &= ~(1 << i)
+            switch i {
+            case 12: // Fast forward hold
+                // Restore the FPS limiter
+                if (fpsLimiterBackup != 0) {
+                    Settings.fpsLimiter = fpsLimiterBackup;
+                    fpsLimiterBackup = 0;
+                }
+
+            default:
+                // Send a key release to the core
+                CoreBridge.releaseKey(CInt(i))
+            }
+        }
+    }
+}
+
 struct SaveRow: View {
-    @State var present = false
     let reload: (() -> Void)
     let title: String
     let size: CInt
+    @State private var present = false
 
     var body: some View {
         // List a save type that shows a resize confirmation alert when selected
@@ -44,22 +100,22 @@ struct SaveRow: View {
 }
 
 struct NooView: View {
-    @Binding var running: Bool
-    @State var menu = false
-    @State var controls = true
-    @State var showSave = false
-    @State var showLoad = false
+    @Binding private var running: Bool
+    @State private var menu = false
+    @State private var controls = true
+    @State private var showSave = false
+    @State private var showLoad = false
 
-    let space = CGColorSpaceCreateDeviceRGB()
-    let info = CGBitmapInfo(alpha: .noneSkipLast, component: .integer, byteOrder: .orderDefault)
-    let topProv: CGDataProvider
-    let botProv: CGDataProvider
-    var ids = [CChar]([0, 1])
+    private let space = CGColorSpaceCreateDeviceRGB()
+    private let info = CGBitmapInfo(alpha: .noneSkipLast, component: .integer, byteOrder: .orderDefault)
+    private let topProv: CGDataProvider
+    private let botProv: CGDataProvider
+    private var ids = [CChar]([0, 1])
 
-    let ndsPath: String
-    let gbaPath: String
+    private let ndsPath: String
+    private let gbaPath: String
 
-    @Environment(\.displayScale) var scale: CGFloat
+    @Environment(\.displayScale) private var scale: CGFloat
 
     init(running: Binding<Bool>, ndsPath: String, gbaPath: String) {
         // Initialize the top/bottom framebuffer providers
@@ -73,6 +129,23 @@ struct NooView: View {
         self.ndsPath = ndsPath
         self.gbaPath = gbaPath
         CoreBridge.start()
+
+        // Set the gamepad handler to update keys based on mappings
+        setGamepadHandler { _, element in
+            if let input = element as? GCControllerButtonInput {
+                for i in 0..<16 {
+                    updateKey(elem: input, cond: input.isPressed, i: i)
+                }
+            }
+            else if let input = element as? GCControllerDirectionPad {
+                for i in 0..<16 {
+                    updateKey(elem: input.up, cond: input.yAxis.value >= 0.5, i: i)
+                    updateKey(elem: input.down, cond: input.yAxis.value <= -0.5, i: i)
+                    updateKey(elem: input.left, cond: input.xAxis.value <= -0.5, i: i)
+                    updateKey(elem: input.right, cond: input.xAxis.value >= 0.5, i: i)
+                }
+            }
+        }
     }
 
     var body: some View {
@@ -309,7 +382,7 @@ struct NooView: View {
         }
     }
 
-    func reload() -> Void {
+    private func reload() -> Void {
         // Reload the core or bail on error
         if CoreBridge.loadRom(ndsPath, gbaPath) == 0 {
             CoreBridge.start()
@@ -321,17 +394,17 @@ struct NooView: View {
     }
 }
 
-func bytesCb(info: UnsafeMutableRawPointer?, buffer: UnsafeMutableRawPointer, count: Int) -> Int {
+private func bytesCb(info: UnsafeMutableRawPointer?, buffer: UnsafeMutableRawPointer, count: Int) -> Int {
     // Forward the bytes callback to the C++ bridge
     return Int(CoreBridge.bytesCb(info, buffer, Int32(count)))
 }
 
-func forwardCb(info: UnsafeMutableRawPointer?, count: off_t) -> off_t {
+private func forwardCb(info: UnsafeMutableRawPointer?, count: off_t) -> off_t {
     // Forward the forward callback to the C++ bridge
     return off_t(CoreBridge.forwardCb(info, Int32(count)))
 }
 
-func rewindCb(info: UnsafeMutableRawPointer?) -> Void {
+private func rewindCb(info: UnsafeMutableRawPointer?) -> Void {
     // Forward the rewind callback to the C++ bridge
     return CoreBridge.rewindCb(info)
 }
