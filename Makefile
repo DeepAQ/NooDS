@@ -1,7 +1,15 @@
 NAME := noods
 BUILD := build
 SRCS := src src/common src/desktop
-ARGS := -Ofast -flto -std=c++11 -DUSE_GL_CANVAS -DLOG_LEVEL=0
+
+# Base flags. A profiling build (PROFILE=1) keeps optimizations on but adds debug
+# info and frame pointers, and drops LTO, so sampling profilers (e.g. AMD uProf)
+# can resolve symbols, line numbers, and call stacks.
+ifeq ($(PROFILE),1)
+  ARGS := -O2 -g -gdwarf -fno-omit-frame-pointer -std=c++11 -DUSE_GL_CANVAS -DLOG_LEVEL=0
+else
+  ARGS := -Ofast -flto -std=c++11 -DUSE_GL_CANVAS -DLOG_LEVEL=0
+endif
 LIBS := $(shell pkg-config --libs portaudio-2.0)
 INCS := $(shell pkg-config --cflags portaudio-2.0)
 
@@ -34,6 +42,10 @@ ifeq ($(OS),Windows_NT)
 endif
 
 all: $(NAME)
+
+# Optimized build with debug symbols for profiling (no LTO, frame pointers kept).
+profile:
+	$(MAKE) PROFILE=1 $(NAME)
 
 ifneq ($(OS),Windows_NT)
 ifeq ($(shell uname -s),Darwin)

@@ -1,0 +1,28 @@
+name: Profiler Builds
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-windows-profile:
+    runs-on: windows-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+    - name: Install MSYS2
+      uses: msys2/setup-msys2@v2
+      with:
+        msystem: MINGW64
+        update: true
+    - name: Install build tools, wxWidgets, and PortAudio
+      run: pacman -S mingw-w64-x86_64-{gcc,pkg-config,wxwidgets-msw,portaudio,jbigkit} make --noconfirm
+      shell: msys2 {0}
+    - name: Compile (profiling build, debug symbols kept, not stripped)
+      run: make profile -j$(nproc)
+      shell: msys2 {0}
+      working-directory: ${{ github.workspace }}
+    - name: Upload
+      uses: actions/upload-artifact@v4
+      with:
+        name: noods-windows-profile
+        path: noods.exe
