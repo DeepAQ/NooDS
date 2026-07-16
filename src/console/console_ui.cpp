@@ -115,8 +115,8 @@ void ConsoleUI::fillAudioBuffer(uint32_t *buffer, int count, int rate) {
     int scaled = count * 32768 / rate;
     uint32_t *original = core->spu.getSamples(scaled);
     lastSample = original[scaled - 1];
-    for (int i = 0; i < 1024; i++)
-        buffer[i] = original[i * scaled / 1024];
+    for (int i = 0; i < count; i++)
+        buffer[i] = original[i * scaled / count];
     delete[] original;
 }
 

@@ -65,6 +65,7 @@ AudioOutBuffer audioBuffers[2];
 AudioOutBuffer *releasedBuffer;
 uint32_t *audioData[2];
 uint32_t count;
+int bufferSize = 512;
 bool running = true;
 bool playing = false;
 
@@ -132,11 +133,11 @@ void ConsoleUI::endFrame() {
     eglSwapBuffers(display, surface);
     scanned = false;
 
-    // Check if overclock should be reapplied, in case of pressing home for example
-    uint32_t rate;
-    clkrstGetClockRate(&cpuSession, &rate);
-    if (rate != 1785000000)
-        clkrstSetClockRate(&cpuSession, 1785000000);
+    static int frames = 0;
+    if (++frames == 60) {
+        frames = 0;
+        clkrstSetClockRate(&cpuSession, 1750000000);
+    }
 }
 
 void *ConsoleUI::createTexture(uint32_t *data, int width, int height) {
@@ -213,32 +214,11 @@ MenuTouch ConsoleUI::getInputTouch() {
 void outputAudio() {
     while (running && appletMainLoop()) {
         // Refill the audio buffers until stopped
-        if (!playing) continue;
         audoutWaitPlayFinish(&releasedBuffer, &count, UINT64_MAX);
         for (uint32_t i = 0; i < count; i++) {
-            ConsoleUI::fillAudioBuffer((uint32_t*)releasedBuffer[i].buffer, 1024, 48000);
+            ConsoleUI::fillAudioBuffer((uint32_t*)releasedBuffer[i].buffer, bufferSize, 48000);
             audoutAppendAudioOutBuffer(&releasedBuffer[i]);
         }
-    }
-}
-
-void suspendAudio(AppletHookType hook, void *param) {
-    // Verify hook type and get the focus state
-    if (hook != AppletHookType_OnFocusState) return;
-    AppletFocusState state = appletGetFocusState();
-
-    // Start/stop audio output on suspend/resume to avoid it messing up
-    if (state == AppletFocusState_InFocus && !playing) {
-        audoutInitialize();
-        audoutStartAudioOut();
-        for (int i = 0; i < 2; i++)
-            audoutAppendAudioOutBuffer(&audioBuffers[i]);
-        playing = true;
-    }
-    else if (state != AppletFocusState_InFocus && playing) {
-        playing = false;
-        audoutStopAudioOut();
-        audoutExit();
     }
 }
 
@@ -295,11 +275,6 @@ MenuTouch gyroTouch() {
 }
 
 int main(int argc, char **argv) {
-    // Overclock the Switch CPU
-    clkrstInitialize();
-    clkrstOpenSession(&cpuSession, PcvModuleId_CpuBus, 0);
-    clkrstSetClockRate(&cpuSession, 1785000000);
-
     // Initialize OpenGL
     display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
     eglInitialize(display, nullptr, nullptr);
@@ -343,9 +318,13 @@ int main(int argc, char **argv) {
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
+    // Start audio output; the OS handles suspend/resume automatically
+    audoutInitialize();
+    audoutStartAudioOut();
+
     // Initialize audio buffers
     for (int i = 0; i < 2; i++) {
-        int size = 1024 * sizeof(uint32_t);
+        int size = bufferSize * sizeof(uint32_t);
         audioData[i] = (uint32_t*)memalign(0x1000, size);
         memset(audioData[i], 0, size);
         audioBuffers[i].next = nullptr;
@@ -353,12 +332,9 @@ int main(int argc, char **argv) {
         audioBuffers[i].buffer_size = size;
         audioBuffers[i].data_size = size;
         audioBuffers[i].data_offset = 0;
+        audoutAppendAudioOutBuffer(&audioBuffers[i]);
     }
 
-    // Hook up the suspend handler and start the audio thread
-    AppletHookCookie cookie;
-    appletHook(&cookie, suspendAudio, nullptr);
-    appletSetFocusHandlingMode(AppletFocusHandlingMode_NoSuspend);
     std::thread audioThread(outputAudio);
 
     // Initialize input
@@ -396,10 +372,16 @@ int main(int argc, char **argv) {
     if (argc < 2 || ConsoleUI::setPath(argv[1]) < 2)
         ConsoleUI::fileBrowser();
 
+    // Initialize CPU overclocking
+    clkrstInitialize();
+    clkrstOpenSession(&cpuSession, PcvModuleId_CpuBus, 0);
+
     // Run the emulator until it exits
     ConsoleUI::mainLoop(gyroTouch);
     running = false;
     audioThread.join();
+    audoutStopAudioOut();
+    audoutExit();
     eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
     eglDestroyContext(display, context);
     eglDestroySurface(display, surface);
