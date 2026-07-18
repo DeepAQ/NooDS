@@ -27,14 +27,16 @@ Gpu3DRenderer::Gpu3DRenderer(Core *core): core(core) {
     // This is mainly in case 3D is requested before the threads have a chance to start
     for (int i = 0; i < 192 * 2; i++)
         ready[i].store(3);
+
+    // Initialize the persistent worker pool state (the pool is created lazily on first use)
+    poolRunning.store(false);
+    frameSeq.store(0);
+    workersDone.store(0);
 }
 
 Gpu3DRenderer::~Gpu3DRenderer() {
-    // Clean up the threads
-    for (size_t i = 0; i < threads.size(); i++) {
-        threads[i]->join();
-        delete threads[i];
-    }
+    // Clean up the persistent worker pool
+    stopPool();
 }
 
 void Gpu3DRenderer::saveState(FILE *file) {
@@ -132,22 +134,37 @@ void Gpu3DRenderer::drawScanline(int line) {
         // Update the resolution shift for the next frame
         resShift = Settings::highRes3D;
 
-        // Clean up any existing threads
-        for (size_t i = 0; i < threads.size(); i++) {
-            threads[i]->join();
-            delete threads[i];
-        }
-        threads.clear();
+        // Wait for the previous frame's workers to finish before touching shared state
+        if (poolRunning.load())
+            finishPoolFrame();
 
         // Set up threaded 3D rendering if enabled
         if ((activeThreads = Settings::threaded3D & 0xF)) {
+            // (Re)create the persistent worker pool if the thread count changed
+            if (!poolRunning.load() || poolThreadCount != activeThreads) {
+                stopPool();
+
+                poolRunning.store(true);
+                poolThreadCount = activeThreads;
+                frameSeq.store(0);
+                workersDone.store(0);
+
+                // Create the persistent worker threads
+                for (uint8_t i = 0; i < activeThreads; i++)
+                    threads.push_back(new std::thread(&Gpu3DRenderer::threadLoop, this, i));
+            }
+
             // Mark the scanlines as not ready
             for (int i = 0; i < (192 << resShift); i++)
                 ready[i].store(0);
 
-            // Create threads to draw the scanlines
-            for (uint8_t i = 0; i < activeThreads; i++)
-                threads.push_back(new std::thread(&Gpu3DRenderer::drawThreaded, this, i));
+            // Signal the pool to begin drawing this frame's scanlines
+            startPoolFrame();
+        }
+        else {
+            // Threading is disabled this frame; tear down any existing pool
+            if (poolRunning.load())
+                stopPool();
         }
     }
 
@@ -168,6 +185,71 @@ void Gpu3DRenderer::drawScanline(int line) {
             if (line == 191) finishScanline(191);
         }
     }
+}
+
+void Gpu3DRenderer::threadLoop(int thread) {
+    int localSeq = 0;
+
+    while (poolRunning.load()) {
+        // Idle until a new frame is queued (or shutdown is requested)
+        {
+            std::unique_lock<std::mutex> lock(poolMutex);
+            poolCond.wait(lock, [this, &localSeq] {
+                return !poolRunning.load() || frameSeq.load() != localSeq;
+            });
+        }
+
+        // Exit the thread if the pool is being torn down
+        if (!poolRunning.load())
+            return;
+
+        // Advance to the current frame and draw this thread's scanline stride
+        localSeq = frameSeq.load();
+        drawThreaded(thread);
+
+        // Signal that this worker has finished the frame
+        workersDone.fetch_add(1);
+    }
+}
+
+void Gpu3DRenderer::startPoolFrame() {
+    // Reset the completion counter and advance the frame sequence to wake the workers
+    workersDone.store(0);
+    {
+        std::lock_guard<std::mutex> lock(poolMutex);
+        frameSeq.fetch_add(1);
+    }
+    poolCond.notify_all();
+}
+
+void Gpu3DRenderer::finishPoolFrame() {
+    // Wait for all workers to finish their scanline strides (frame barrier)
+    while (workersDone.load() < poolThreadCount)
+        std::this_thread::yield();
+}
+
+void Gpu3DRenderer::stopPool() {
+    if (!poolRunning.load() && threads.empty())
+        return;
+
+    // Make sure any in-flight frame is finished before tearing down
+    finishPoolFrame();
+
+    // Signal shutdown and wake all workers so they can exit
+    poolRunning.store(false);
+    {
+        std::lock_guard<std::mutex> lock(poolMutex);
+        frameSeq.fetch_add(1);
+    }
+    poolCond.notify_all();
+
+    // Join and delete the worker threads
+    for (size_t i = 0; i < threads.size(); i++) {
+        threads[i]->join();
+        delete threads[i];
+    }
+    threads.clear();
+    poolThreadCount = 0;
 }
 
 void Gpu3DRenderer::drawThreaded(int thread) {

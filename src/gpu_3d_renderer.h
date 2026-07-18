@@ -20,9 +20,12 @@
 #pragma once
 
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
 #include <cstdio>
+#include <mutex>
 #include <thread>
+#include <vector>
 
 class Core;
 struct Vertex;
@@ -67,6 +70,14 @@ private:
     std::vector<std::thread*> threads;
     std::atomic<int> ready[192 * 2];
 
+    // Persistent worker pool synchronization
+    std::atomic<bool> poolRunning;
+    std::atomic<int> frameSeq;
+    std::atomic<int> workersDone;
+    int poolThreadCount = 0;
+    std::mutex poolMutex;
+    std::condition_variable poolCond;
+
     uint16_t disp3DCnt = 0;
     uint16_t edgeColor[8] = {};
     uint32_t clearColor = 0;
@@ -83,6 +94,11 @@ private:
     void drawThreaded(int thread);
     void drawScanline1(int line);
     void finishScanline(int line);
+
+    void threadLoop(int thread);
+    void startPoolFrame();
+    void finishPoolFrame();
+    void stopPool();
 
     uint8_t *getTexture(uint32_t address);
     uint8_t *getPalette(uint32_t address);
