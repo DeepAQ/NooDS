@@ -23,14 +23,22 @@
 Gpu::Gpu(Core *core): core(core) {
     // Mark the thread as not drawing to start
     ready.store(false);
-    running.store(false);
+    running.store(true);
     drawing.store(0);
+    frameActive.store(false);
+    workerIdle.store(true);
 }
 
 Gpu::~Gpu() {
-    // Clean up the thread
+    // Clean up the persistent thread
     if (thread) {
+        // Signal shutdown and wake the worker if it's idling
         running.store(false);
+        {
+            std::lock_guard<std::mutex> lock(frameMutex);
+            frameActive.store(true);
+        }
+        frameCond.notify_one();
         thread->join();
         delete thread;
     }
@@ -217,7 +225,7 @@ bool Gpu::getFrame(uint32_t *out, bool gbaCrop) {
 
 void Gpu::gbaScanline240() {
     if (vCount < 160) {
-        if (thread) {
+        if (frameThreaded) {
             // Wait for the thread to finish the scanline
             while (drawing.load() != 0)
                 std::this_thread::yield();
@@ -249,12 +257,10 @@ void Gpu::gbaScanline308() {
     // Move to the next scanline
     switch (++vCount) {
     case 160: // End of visible scanlines
-        // Stop the thread now that the frame has been drawn
-        if (thread) {
-            running.store(false);
-            thread->join();
-            delete thread;
-            thread = nullptr;
+        // Wait for the thread to finish the frame now that it has been drawn
+        if (frameThreaded) {
+            finishFrameThread();
+            frameThreaded = false;
         }
 
         // Set the V-blank flag
@@ -300,9 +306,9 @@ void Gpu::gbaScanline308() {
         core->gpu2D[0].reloadRegisters();
 
         // Start the 2D thread if enabled
-        if (Settings::threaded2D && frames == 0 && !thread) {
-            running.store(true);
-            thread = new std::thread(&Gpu::drawGbaThreaded, this);
+        if (Settings::threaded2D && frames == 0 && !frameThreaded) {
+            frameThreaded = true;
+            startFrameThread(true);
         }
         break;
     }
@@ -311,7 +317,7 @@ void Gpu::gbaScanline308() {
     core->gpu2D[0].updateWindows(vCount);
 
     // Signal that the next scanline should start drawing
-    if (vCount < 160 && thread)
+    if (vCount < 160 && frameThreaded)
         drawing.store(1);
 
     // Check if the current scanline matches the V-counter
@@ -334,7 +340,7 @@ void Gpu::gbaScanline308() {
 
 void Gpu::scanline256() {
     if (vCount < 192) {
-        if (thread) {
+        if (frameThreaded) {
             // Make sure the thread has started before changing the state
             while (drawing.load() == 1)
                 std::this_thread::yield();
@@ -476,12 +482,10 @@ void Gpu::scanline355() {
     // Move to the next scanline
     switch (++vCount) {
     case 192: // End of visible scanlines
-        // Stop the thread now that the frame has been drawn
-        if (thread) {
-            running.store(false);
-            thread->join();
-            delete thread;
-            thread = nullptr;
+        // Wait for the thread to finish the frame now that it has been drawn
+        if (frameThreaded) {
+            finishFrameThread();
+            frameThreaded = false;
         }
 
         for (int i = 0; i < 2; i++) {
@@ -555,9 +559,9 @@ void Gpu::scanline355() {
         core->gpu2D[1].reloadRegisters();
 
         // Start the 2D thread if enabled
-        if (Settings::threaded2D && frames == 0 && !thread) {
-            running.store(true);
-            thread = new std::thread(&Gpu::drawThreaded, this);
+        if (Settings::threaded2D && frames == 0 && !frameThreaded) {
+            frameThreaded = true;
+            startFrameThread(false);
         }
         break;
     }
@@ -567,7 +571,7 @@ void Gpu::scanline355() {
     core->gpu2D[1].updateWindows(vCount);
 
     // Signal that the next scanline should start drawing
-    if (vCount < 192 && thread)
+    if (vCount < 192 && frameThreaded)
         drawing.store(1);
 
     for (int i = 0; i < 2; i++) {
@@ -593,11 +597,59 @@ void Gpu::scanline355() {
     core->schedule(NDS_SCANLINE355, 355 * 6);
 }
 
-void Gpu::drawGbaThreaded() {
+void Gpu::threadLoop() {
     while (running.load()) {
+        // Idle until a frame is queued for threaded drawing (or shutdown is requested)
+        {
+            std::unique_lock<std::mutex> lock(frameMutex);
+            frameCond.wait(lock, [this] { return frameActive.load(); });
+        }
+
+        // Exit the thread if shutdown was requested
+        if (!running.load())
+            return;
+
+        // Draw the frame using the appropriate scanline routine
+        // The loop runs until the producer clears frameActive at the end of the frame
+        if (gbaThreaded)
+            drawGbaThreaded();
+        else
+            drawThreaded();
+
+        // Signal that the worker has returned to idle so the barrier can proceed
+        workerIdle.store(true);
+    }
+}
+
+void Gpu::startFrameThread(bool gba) {
+    // Lazily create the persistent worker on first use, so it's never spawned when threading is off
+    if (!thread)
+        thread = new std::thread(&Gpu::threadLoop, this);
+
+    // Signal the persistent worker to begin processing scanlines for a new frame
+    workerIdle.store(false);
+    {
+        std::lock_guard<std::mutex> lock(frameMutex);
+        gbaThreaded = gba;
+        frameActive.store(true);
+    }
+    frameCond.notify_one();
+}
+
+void Gpu::finishFrameThread() {
+    // Tell the worker to stop looping at the end of the frame
+    frameActive.store(false);
+
+    // Wait for the worker to finish its current scanline and return to idle (frame barrier)
+    while (!workerIdle.load())
+        std::this_thread::yield();
+}
+
+void Gpu::drawGbaThreaded() {
+    while (frameActive.load()) {
         // Wait until the next scanline should start
         while (drawing.load() != 1) {
-            if (!running.load()) return;
+            if (!frameActive.load()) return;
             std::this_thread::yield();
         }
 
@@ -610,10 +662,10 @@ void Gpu::drawGbaThreaded() {
 }
 
 void Gpu::drawThreaded() {
-    while (running.load()) {
+    while (frameActive.load()) {
         // Wait until the next scanline should start
         while (drawing.load() != 1) {
-            if (!running.load()) return;
+            if (!frameActive.load()) return;
             std::this_thread::yield();
         }
 

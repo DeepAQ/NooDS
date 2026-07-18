@@ -20,6 +20,7 @@
 #pragma once
 
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
 #include <thread>
 #include <mutex>
@@ -71,6 +72,14 @@ private:
     std::atomic<int> drawing;
     std::thread *thread = nullptr;
 
+    // Persistent worker synchronization
+    std::atomic<bool> frameActive;
+    std::atomic<bool> workerIdle;
+    bool gbaThreaded = false;
+    bool frameThreaded = false;
+    std::mutex frameMutex;
+    std::condition_variable frameCond;
+
     int frames = 0;
     bool gbaBlock = true;
     bool displayCapture = false;
@@ -87,4 +96,7 @@ private:
 
     void drawGbaThreaded();
     void drawThreaded();
+    void threadLoop();
+    void startFrameThread(bool gba);
+    void finishFrameThread();
 };
