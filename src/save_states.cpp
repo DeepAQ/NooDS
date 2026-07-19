@@ -76,6 +76,10 @@ bool SaveStates::saveState() {
     // Open the state file and write the header
     FILE *file = openFile("wb");
     if (!file) return false;
+
+    // Make sure the GPU worker threads aren't drawing before touching shared state
+    // At a frame boundary the 2D/3D workers can still be finishing the current frame
+    core->gpu.finishThreads();
     fwrite(stateTag, sizeof(uint8_t), 4, file);
     fwrite(&stateVersion, sizeof(uint32_t), 1, file);
 
@@ -115,6 +119,11 @@ bool SaveStates::loadState() {
     FILE *file = openFile("rb");
     if (!file) return false;
     fseek(file, 8, SEEK_SET);
+
+    // Make sure the GPU worker threads aren't drawing before overwriting shared state
+    // Otherwise a worker still finishing the previous frame can race with deserialization
+    // and be left in an inconsistent barrier state, spinning at 100% CPU forever
+    core->gpu.finishThreads();
 
     // Load the state of every component
     core->loadState(file);

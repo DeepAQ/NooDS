@@ -187,6 +187,21 @@ void Gpu3DRenderer::drawScanline(int line) {
     }
 }
 
+void Gpu3DRenderer::finishThreads() {
+    // Fully quiesce the worker threads so they aren't touching shared state
+    // This is used before save states are loaded, since the pool can still be
+    // drawing the current frame when the core thread is stopped at a frame boundary
+    stopPool();
+
+    // Mark all scanlines as ready so a getLine() after a state load doesn't block
+    // on stale scanlines that will never be drawn (e.g. when 3D isn't dirty)
+    for (int i = 0; i < 192 * 2; i++)
+        ready[i].store(3);
+
+    // Reset the active thread count so the next frame recreates the pool cleanly
+    activeThreads = 0;
+}
+
 void Gpu3DRenderer::threadLoop(int thread) {
     int localSeq = 0;
 

@@ -40,6 +40,7 @@ public:
 
     bool getFrame(uint32_t *out, bool gbaCrop);
     void invalidate3D() { dirty3D |= BIT(0); }
+    void finishThreads();
 
     void gbaScanline240();
     void gbaScanline308();

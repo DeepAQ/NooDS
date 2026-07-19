@@ -41,6 +41,7 @@ public:
 
     void drawScanline(int line);
     uint32_t *getLine(int line);
+    void finishThreads();
 
     uint16_t readDisp3DCnt() { return disp3DCnt; }
 

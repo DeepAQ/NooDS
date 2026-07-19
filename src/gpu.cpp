@@ -597,6 +597,20 @@ void Gpu::scanline355() {
     core->schedule(NDS_SCANLINE355, 355 * 6);
 }
 
+void Gpu::finishThreads() {
+    // Quiesce the persistent 2D worker so it isn't drawing during a state load
+    if (frameThreaded) {
+        finishFrameThread();
+        frameThreaded = false;
+    }
+
+    // Reset the producer/worker handshake to a known idle state
+    drawing.store(0);
+
+    // Quiesce the 3D renderer's worker threads as well
+    core->gpu3DRenderer.finishThreads();
+}
+
 void Gpu::threadLoop() {
     while (running.load()) {
         // Idle until a frame is queued for threaded drawing (or shutdown is requested)
